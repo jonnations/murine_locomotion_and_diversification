@@ -268,9 +268,9 @@ total_plot <- total_draws %>%
   #stat_dotsh(quantiles = 150, dotsize = 1.2) +
   geom_vline(xintercept = c(0), linetype = "dashed") +
   scale_fill_manual(values = c("gray80")) + 
-  labs(x = "Relative Hind total Differences\n",
+  labs(x = "Relative Total Differences\n",
        y = "",
-       #title = "Hind total",
+       #title = "Total",
        center = T) +
   theme(plot.title = element_text(size=7)) + 
   theme(axis.title.y  = element_text(size = 4)) +
@@ -293,9 +293,9 @@ tail_plot <- tail_draws %>%
   #stat_dotsh(quantiles = 150, dotsize = 1.2) +
   geom_vline(xintercept = c(0), linetype = "dashed") +
   scale_fill_manual(values = c("gray80")) + 
-  labs(x = "Relative Hind tail Differences\n",
+  labs(x = "Relative Tail Differences\n",
        y = "",
-       #title = "Hind tail",
+       #title = "Tail",
        center = T) +
   theme(plot.title = element_text(size=7)) + 
   theme(axis.title.y  = element_text(size = 4)) +
@@ -343,9 +343,9 @@ mass_plot <- mass_draws %>%
   #stat_dotsh(quantiles = 150, dotsize = 1.2) +
   geom_vline(xintercept = c(0), linetype = "dashed") +
   scale_fill_manual(values = c("gray80")) + 
-  labs(x = "Relative Hind mass Differences\n",
+  labs(x = "Relative Mass Differences\n",
        y = "",
-       #title = "Hind mass",
+       #title = "Mass",
        center = T) +
   theme(plot.title = element_text(size=7)) + 
   theme(axis.title.y  = element_text(size = 4)) +
