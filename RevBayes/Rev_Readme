@@ -1,0 +1,1 @@
+For this paper we used custom scripts to send this `.Rev` template out to 100 nodes on the Louisiana State University HPC. Each template used a unique phylogenetic tree. The results were then merged together into a single `.log` file. We presented these merged results in this manuscript. If you are interested in additional details on the parallel processing, please contact me. 
