@@ -1,0 +1,301 @@
+---
+title: "Trait Covariation"
+author: "Jon Nations"
+date: "8/27/2020"
+output: html_document
+---
+This markdown provides the code for the trait covariation analyses in Nations et al. `Locomotory mode transitions alter phenotypic evolution and lineage diversification in an ecologically rich clade of mammals`.
+
+These are used in the third section of the methods entitled `Trait covariation and integration`
+
+Read more about multivariate multilevel models in brms here: https://cran.r-project.org/web/packages/brms/vignettes/brms_multivariate.html
+
+Set directory
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/Users....")
+```
+Packages
+Written using:
+brms 2.13.3
+```{r}
+library(brms)
+library(tidyverse)
+library(MCMCglmm)
+library(phytools)
+library(geiger)
+```
+## Load Data
+Individual csv files for each locomotor mode model
+Full file for complete correlation model
+```{r}
+tree <- read.tree("MCCtree.nwk")
+A_dat <- read.csv("Data_Cor_Arboreal.csv", header=TRUE,row.names=1, stringsAsFactors=FALSE)
+C_dat <- read.csv("Data_Cor_General.csv", header=TRUE,row.names=1, stringsAsFactors=FALSE)
+T_dat <- read.csv("Data_Cor_Terrestrial.csv", header=TRUE,row.names=1, stringsAsFactors=FALSE)
+SA_dat <- read.csv("Data_Cor_Amphibious.csv", header=TRUE,row.names=1, stringsAsFactors=FALSE)
+dat <- read.csv("Data_Cor_All.csv", header=TRUE,row.names=1, stringsAsFactors=FALSE)
+A_dat$logmass <- as.numeric(scale(A_dat$logmass))
+T_dat$logmass <- as.numeric(scale(T_dat$logmass))
+C_dat$logmass <- as.numeric(scale(C_dat$logmass))
+SA_dat$logmass <- as.numeric(scale(SA_dat$logmass))
+dat$logmass <- as.numeric(scale(dat$logmass))
+```
+
+## Prepare Covariance Matrices
+List of arboreal species
+```{r}
+treedat <- treedata(tree, A_dat, warnings = F)
+atip <- treedat$phy$tip.label
+Atree <- keep.tip(tree,tip=atip)
+```
+prepare tree for model
+```{r}
+inv.phylo <- MCMCglmm::inverseA(Atree, nodes = "TIPS", scale = TRUE)
+AA <- solve(inv.phylo$Ainv)
+rownames(AA) <- rownames(inv.phylo$Ainv)
+```
+
+list of general species
+```{r}
+treedat <- treedata(tree, C_dat, warnings = F)
+ctip <- treedat$phy$tip.label
+Ctree <- keep.tip(tree,tip=ctip)
+```
+prepare general tree
+```{r}
+inv.phylo <- MCMCglmm::inverseA(Ctree, nodes = "TIPS", scale = TRUE)
+CA <- solve(inv.phylo$Ainv)
+rownames(CA) <- rownames(inv.phylo$Ainv)
+```
+
+list of terrestrial species
+```{r}
+treedat <- treedata(tree, T_dat, warnings = F)
+ttip <- treedat$phy$tip.label
+Ttree <- keep.tip(tree,tip=ttip)
+```
+prepare terrestrial tree
+```{r}
+inv.phylo <- MCMCglmm::inverseA(Ttree, nodes = "TIPS", scale = TRUE)
+TA <- solve(inv.phylo$Ainv)
+rownames(TA) <- rownames(inv.phylo$Ainv)
+```
+list of amphibious species
+```{r}
+treedat <- treedata(tree, SA_dat, warnings = F)
+satip <- treedat$phy$tip.label
+SAtree <- keep.tip(tree,tip=satip)
+```
+prepare amphibious tree
+```{r}
+inv.phylo <- MCMCglmm::inverseA(SAtree, nodes = "TIPS", scale = TRUE)
+SAA <- solve(inv.phylo$Ainv)
+rownames(SAA) <- rownames(inv.phylo$Ainv)
+```
+
+
+list of all species
+```{r}
+treedat <- treedata(tree, dat, warnings = F)
+alltip <- treedat$phy$tip.label
+Alltree <- keep.tip(tree,tip=alltip)
+```
+prepare all species tree
+```{r}
+inv.phylo <- MCMCglmm::inverseA(Alltree, nodes = "TIPS", scale = TRUE)
+All <- solve(inv.phylo$Ainv)
+rownames(All) <- rownames(inv.phylo$Ainv)
+```
+
+# Models
+## Arboreal Trait Covariance
+The `mvbind()` binds the four response variables together. These models then estimate the correlation between each of the four response variables, conditioned on the phylogeny
+```{r}
+A_cor <- brm(mvbind(hb, tail_index, hf_hb, logmass) ~ 0 + (1|gr(phylo, cov = A)),
+  data = A_dat,
+  data2 = list(A = AA),
+  family = student(link = "identity"),
+  iter = 5000,
+ prior = c(
+  set_prior("gamma(2,0.5)", class = "nu"),
+  set_prior("normal(0,1)", class = "sd", resp = "hb"),
+  set_prior("normal(0,1)", class = "sd", resp = "tailindex"),
+  set_prior("normal(0,1)", class = "sd", resp = "hfhb"),
+  set_prior("normal(0,1)", class = "sd", resp = "logmass"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "hb"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "tailindex"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "hfhb"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "logmass"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "hb"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "tailindex"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "hfhb"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "logmass")),
+  control = list(adapt_delta = 0.99, max_treedepth = (15)),
+  inits = "0",
+  cores = 2#,
+ #add file name here if you want to save rds
+ #file = "Arboreal_Correlation"
+)
+
+```
+
+```{r}
+summary(A_cor)
+```
+```{r}
+plot(A_cor, N=3, ask = F)
+```
+
+## General Trait Covariance
+```{r}
+C_cor <- brm(mvbind(hb, tail_index, hf_hb, logmass) ~ 0 +  (1|gr(phylo, cov = A)),
+  data = C_dat,
+  data2 = list(A = CA),
+  family = student(link = "identity"),
+  iter = 5000,
+ prior = c(
+  set_prior("gamma(2,0.5)", class = "nu"),
+  set_prior("normal(0,1)", class = "sd", resp = "hb"),
+  set_prior("normal(0,1)", class = "sd", resp = "tailindex"),
+  set_prior("normal(0,1)", class = "sd", resp = "hfhb"),
+  set_prior("normal(0,1)", class = "sd", resp = "logmass"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "hb"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "tailindex"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "hfhb"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "logmass"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "hb"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "tailindex"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "hfhb"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "logmass")),
+  control = list(adapt_delta = 0.99, max_treedepth = (15)),
+  inits = "0",
+  cores = 2#,
+ #add file name here if you want to save rds
+ #file = "Arboreal_Correlation"
+)
+
+```
+
+```{r}
+summary(C_cor)
+```
+
+```{r}
+plot(C_cor, N=3, ask = F)
+```
+
+## Terrestrial Trait Covariance
+```{r}
+T_cor <- brm(mvbind(hb, tail_index, hf_hb, logmass) ~ 0 +  (1|gr(phylo, cov = A)),
+  data = T_dat,
+  data2 = list(A = TA),
+  family = student(link = "identity"),
+  iter = 5000,
+ prior = c(
+  set_prior("gamma(2,0.5)", class = "nu"),
+  set_prior("normal(0,1)", class = "sd", resp = "hb"),
+  set_prior("normal(0,1)", class = "sd", resp = "tailindex"),
+  set_prior("normal(0,1)", class = "sd", resp = "hfhb"),
+  set_prior("normal(0,1)", class = "sd", resp = "logmass"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "hb"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "tailindex"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "hfhb"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "logmass"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "hb"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "tailindex"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "hfhb"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "logmass")),
+  control = list(adapt_delta = 0.99, max_treedepth = (15)),
+  inits = "0",
+  cores = 2#,
+ #add file name here if you want to save rds
+ #file = "Arboreal_Correlation"
+)
+
+```
+
+```{r}
+summary(T_cor)
+```
+
+```{r}
+plot(T_cor, N=3, ask = F)
+```
+
+## Amphibious Trait Covariance
+```{r}
+SA_cor <- brm(mvbind(hb, tail_index, hf_hb, logmass) ~ 0 +  (1|gr(phylo, cov = A)),
+  data = SA_dat,
+  data2 = list(A = SAA),
+  family = student(link = "identity"),
+  iter = 5000,
+ prior = c(
+  set_prior("gamma(2,0.5)", class = "nu"),
+  set_prior("normal(0,1)", class = "sd", resp = "hb"),
+  set_prior("normal(0,1)", class = "sd", resp = "tailindex"),
+  set_prior("normal(0,1)", class = "sd", resp = "hfhb"),
+  set_prior("normal(0,1)", class = "sd", resp = "logmass"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "hb"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "tailindex"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "hfhb"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "logmass"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "hb"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "tailindex"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "hfhb"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "logmass")),
+  control = list(adapt_delta = 0.99, max_treedepth = (15)),
+  inits = "0",
+  cores = 2#,
+ #add file name here if you want to save rds
+ #file = "Arboreal_Correlation"
+)
+
+```
+
+```{r}
+summary(SA_cor)
+```
+
+```{r}
+plot(SA_cor, N=3, ask = F)
+```
+
+## All Trait Covariance
+
+```{r}
+All_cor <- brm(mvbind(hb, tail_index, hf_hb, logmass) ~ 0 +  (1|gr(phylo, cov = A)),
+  data = dat,
+  data2 = list(A = All),
+  family = student(link = "identity"),
+  iter = 5000,
+ prior = c(
+  set_prior("gamma(2,0.5)", class = "nu"),
+  set_prior("normal(0,1)", class = "sd", resp = "hb"),
+  set_prior("normal(0,1)", class = "sd", resp = "tailindex"),
+  set_prior("normal(0,1)", class = "sd", resp = "hfhb"),
+  set_prior("normal(0,1)", class = "sd", resp = "logmass"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "hb"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "tailindex"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "hfhb"),
+  set_prior("normal(0,1)", class = "sd", group = "phylo", resp = "logmass"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "hb"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "tailindex"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "hfhb"),
+  set_prior("normal(0.2,0.5)", class = "sigma", resp = "logmass")),
+  control = list(adapt_delta = 0.99, max_treedepth = (15)),
+  inits = "0",
+  cores = 2#,
+ #add file name here if you want to save rds
+ #file = "Arboreal_Correlation"
+)
+
+```
+
+```{r}
+summary(All_cor)
+```
+
+```{r}
+plot(All_cor, N=3, ask = F)
+```
+

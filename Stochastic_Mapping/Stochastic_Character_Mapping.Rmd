@@ -1,0 +1,78 @@
+---
+title: "Stochastic Character Mapping in phytools"
+author: "Jon Nations"
+date: "8/27/2020"
+output: html_document
+---
+This markdown provides the code for the stochastic character state model used in Nations et al. Locomotory mode transitions alter phenotypic evolution and lineage diversification in an ecologically rich clade of mammals.
+
+These are used in the third section of the methods entitled `Ancestral State Estimation of Locomotor Mode and Transitions`
+
+Set directory
+```{r setup, include=FALSE}
+
+knitr::opts_knit$set(root.dir = "/Users/....")
+```
+
+```{r}
+library(tidyverse)
+library(phytools)
+library(geiger)
+```
+
+Read in 1000 trees from the posterior distribution of time-calibrated trees from the Beast Analysis. Then sample 100 trees.
+```{r}
+trees <- read.tree(file ="1000.nex")
+trees <- sample(trees, size = 100)
+```
+Read in character states file
+```{r}
+dat <- read.csv(file = "states.csv", header = T, row.names = 1)
+#vectorize
+dat <-setNames(dat[,1],rownames(dat))
+```
+
+Subset one tree in order to drop appropriate taxa
+```{r}
+tree <- trees[[1]]
+write.tree(tree, file = "one_tree.nwk")
+dtt <- read.tree("one_tree.nwk")
+```
+geiger::treedata
+```{r}
+treedat <- treedata(dtt, dat, warnings = T)
+```
+
+These are the tips to drop from the multiphylo object 
+```{r}
+dat <- treedat$data
+tips <- c("Apodemus_chejuensis", "Apodemus_hermonensis", "Apodemus_wardi", "Aethomys_namaquensis", "Gerbillus_gerbillus","Hylomyscus_endorobae", "Hylomyscus_kaimosae", "Hylomyscus_pamfi", "Hylomyscus_simus", "Hylomyscus_walterverheyeni", "Mus_lepidoides", "Mus_nitidulus")
+trees<-lapply(trees,drop.tip,tip=tips)
+class(trees)<-"multiPhylo"
+```
+
+Vectorize again....
+```{r}
+dat<-setNames(dat[,1],rownames(dat))
+```
+
+Simmap
+Set root probabtility as per manuscript, then run All-Rates-Differ model on multipylo object
+```{r}
+pi<-setNames(c(0.333,0.333,0.333,0.0001),c("1","2","3","4"))
+smp <- make.simmap(trees, dat, model="ARD", nsim = 100, Q="empirical", pi=pi)
+```
+
+```{r}
+sum_map <- summary(smp)
+```
+
+Quick plot
+```{r}
+plot(sum_map,fsize=0.6,ftype="i", plot = FALSE)
+obj<-sapply(smp_3,markChanges, plot = F)
+```
+Write output
+```{r}
+write.simmap(smp, file = "simmap_100.tre")
+```

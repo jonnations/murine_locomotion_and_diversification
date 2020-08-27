@@ -1,0 +1,356 @@
+---
+title: "Comparing Morphologies Between Locomotor Modes"
+author: "Jon Nations"
+date: "8/27/2020"
+output: html_document
+---
+
+This markdown provides the code for estimating the phylogenetically corrected mean trait values for each locomotor mode, and the scripts to do calculate the differences/contrasts, from Nations et al. `Locomotory mode transitions alter phenotypic evolution and lineage diversification in an ecologically rich clade of mammals`.
+
+Set directory
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/Users/Dicrostonyx/Documents/Projects/AncSt/Manuscript/Evolution_Submission/GitHub")
+```
+Packages
+Written using: brms 2.13.3
+```{r}
+library(brms)
+library(tidyverse)
+library(MCMCglmm)
+library(phytools)
+library(geiger)
+```
+## Load Data
+Individual csv files for each locomotor mode model
+Full file for complete correlation model
+```{r}
+trees <- read.tree("1000.nex")
+trees <- sample(trees, size = 100)
+trees <- lapply(trees, force.ultrametric)
+dat <- read.csv("Scaled_Data.csv", header=TRUE,row.names=1, stringsAsFactors=FALSE)
+```
+
+## Remove extra tips
+```{r}
+tree <- trees[[1]]
+write.tree(tree, file = "one_tree.nwk")
+dtt <- read.tree("one_tree.nwk")
+```
+geiger::treedata
+```{r}
+treedat <- treedata(dtt, dat, warnings = F)
+tips <- treedat$phy$tip.label
+tree_samp <-lapply(trees,keep.tip,tip=tips)
+class(tree_samp)<-"multiPhylo"
+```
+
+##Covariance Matrix
+Generate list of 100 covariance matrices
+```{r}
+inverse<-list()
+As <- list()
+for (i in 1:length(trees) ) {
+  inverse[[i]] <- inverseA(trees[[i]], nodes = "TIPS", scale = TRUE)
+  x <- solve(inverse[[i]]$Ainv)
+  rownames(x) <- rownames(inverse[[i]]$Ainv)
+  As[[i]] <- x
+}
+```
+
+## Models
+#### Warning: These take a Long Time to Run
+Run model using one tree, then loop model over the 100 trees from the posterior distribution using `brms::update`
+Then merge all the models together, and save the `.rds` file
+#### Total Length
+```{r}
+total.fit <- brm(
+  total ~ 0 + state_name + (1|gr(phylo, cov = A)),
+  data = dat,
+  data2 = list(A = As[[1]]),
+  family = student(link = "identity"),
+  iter = 5000,
+  thin = 10,
+  save_all_pars = TRUE,
+ prior = c(
+  set_prior("normal(0,1.5)", class = "b"),
+  set_prior("normal(0,1.5)", class = "sd")),
+  inits = "0",
+  cores = parallel::detectCores()
+)
+
+total.fits <- vector("list", 100) 
+for (i in seq_along(total.fits)) {
+total.fits[[i]] <- update(total.fit,
+                      data2 = list(A = As[[i]],
+                      cores = parallel::detectCores())
+)
+}
+
+```
+#### Combine and Save Model
+Then remove the large file
+```{r}
+total.fits_comb <- combine_models(total.fits[[i]], mlist = total.fits)
+saveRDS(total.fits_comb, file = "/Users/.../......Rds", compress = F)
+summary(total.fits_comb)
+plot(total.fits_comb, N=3, ask = F)
+```
+
+#### Compile the Draws using Tidybayes
+Remove the big model object
+Then save an rds file with JUST the draws and not all the other stuff.
+```{r}
+total_draws <- gather_draws(total.fits_comb, b_state_nameA, b_state_nameC, b_state_nameT, b_state_nameSA) 
+rm(total.fits_comb)
+total_draws$.variable[total_draws$.variable == "b_state_nameA"] <- "Arboreal"
+total_draws$.variable[total_draws$.variable == "b_state_nameC"] <- "General"
+total_draws$.variable[total_draws$.variable == "b_state_nameT"] <- "Terrestrial"
+total_draws$.variable[total_draws$.variable == "b_state_nameSA"] <- "Amphibious"
+saveRDS(total_draws, file = "/Users/.../....../total.gathered.Rds")
+```
+
+#### Relative Tail Length
+```{r}
+tail.fit <- brm(
+  tail_index ~ 0 + state_name + (1|gr(phylo, cov = A)),
+  data = dat,
+  data2 = list(A = As[[1]]),
+  family = student(link = "identity"),
+  iter = 5000,
+  thin = 10,
+  save_all_pars = TRUE,
+ prior = c(
+  set_prior("normal(0,1.5)", class = "b"),
+  set_prior("normal(0,1.5)", class = "sd")),
+  inits = "0",
+  cores = parallel::detectCores()
+)
+
+tail.fits <- vector("list", 100) 
+for (i in seq_along(tail.fits)) {
+tail.fits[[i]] <- update(tail.fit,
+                      data2 = list(A = As[[i]],
+                      cores = parallel::detectCores())
+)
+}
+
+```
+#### Combine and Save Model
+Then remove the large file
+```{r}
+tail.fits_comb <- combine_models(tail.fits[[i]], mlist = tail.fits)
+saveRDS(tail.fits_comb, file = "/Users/.../......Rds", compress = F)
+summary(tail.fits_comb)
+plot(tail.fits_comb, N=3, ask = F)
+```
+
+#### Compile the Draws using Tidybayes
+Remove the big model object
+Then save an rds file with JUST the draws and not all the other stuff.
+```{r}
+tail_draws <- gather_draws(tail.fits_comb, b_state_nameA, b_state_nameC, b_state_nameT, b_state_nameSA) 
+rm(tail.fits_comb)
+tail_draws$.variable[tail_draws$.variable == "b_state_nameA"] <- "Arboreal"
+tail_draws$.variable[tail_draws$.variable == "b_state_nameC"] <- "General"
+tail_draws$.variable[tail_draws$.variable == "b_state_nameT"] <- "Terrestrial"
+tail_draws$.variable[tail_draws$.variable == "b_state_nameSA"] <- "Amphibious"
+saveRDS(tail_draws, file = "/Users/.../....../tail.gathered.Rds")
+```
+
+
+#### Relative Foot Size
+```{r}
+foot.fit <- brm(
+  hf_hb ~ 0 + state_name + (1|gr(phylo, cov = A)),
+  data = dat,
+  data2 = list(A = As[[1]]),
+  family = student(link = "identity"),
+  iter = 5000,
+  thin = 10,
+  save_all_pars = TRUE,
+ prior = c(
+  set_prior("normal(0,1.5)", class = "b"),
+  set_prior("normal(0,1.5)", class = "sd")),
+  inits = "0",
+  cores = parallel::detectCores()
+)
+
+foot.fits <- vector("list", 100) 
+for (i in seq_along(foot.fits)) {
+foot.fits[[i]] <- update(foot.fit,
+                      data2 = list(A = As[[i]],
+                      cores = parallel::detectCores())
+)
+}
+
+```
+#### Combine and Save Model
+Then remove the large file
+```{r}
+foot.fits_comb <- combine_models(foot.fits[[i]], mlist = foot.fits)
+saveRDS(foot.fits_comb, file = "/Users/.../......Rds", compress = F)
+summary(foot.fits_comb)
+plot(foot.fits_comb, N=3, ask = F)
+```
+#### Compile the Draws using Tidybayes
+Remove the big model object
+Then save an rds file with JUST the draws and not all the other stuff.
+```{r}
+foot_draws <- gather_draws(foot.fits_comb, b_state_nameA, b_state_nameC, b_state_nameT, b_state_nameSA) 
+rm(foot.fits_comb)
+foot_draws$.variable[foot_draws$.variable == "b_state_nameA"] <- "Arboreal"
+foot_draws$.variable[foot_draws$.variable == "b_state_nameC"] <- "General"
+foot_draws$.variable[foot_draws$.variable == "b_state_nameT"] <- "Terrestrial"
+foot_draws$.variable[foot_draws$.variable == "b_state_nameSA"] <- "Amphibious"
+saveRDS(foot_draws, file = "/Users/.../....../foot.gathered.Rds")
+```
+
+#### Mass
+```{r}
+mass.fit <- brm(
+  logmass ~ 0 + state_name + (1|gr(phylo, cov = A)),
+  data = dat,
+  data2 = list(A = As[[1]]),
+  family = student(link = "identity"),
+  iter = 5000,
+  thin = 10,
+  save_all_pars = TRUE,
+ prior = c(
+  set_prior("normal(0,1.5)", class = "b"),
+  set_prior("normal(0,1.5)", class = "sd")),
+  inits = "0",
+  cores = parallel::detectCores()
+)
+
+mass.fits <- vector("list", 100) 
+for (i in seq_along(mass.fits)) {
+mass.fits[[i]] <- update(mass.fit,
+                      data2 = list(A = As[[i]],
+                      cores = parallel::detectCores())
+)
+}
+
+```
+#### Combine and Save Model
+Then remove the large file
+```{r}
+mass.fits_comb <- combine_models(mass.fits[[i]], mlist = mass.fits)
+saveRDS(mass.fits_comb, file = "/Users/.../......Rds", compress = F)
+summary(mass.fits_comb)
+plot(mass.fits_comb, N=3, ask = F)
+```
+
+#### Compile the Draws using Tidybayes
+Remove the big model object
+Then save an rds file with JUST the draws and not all the other stuff.
+```{r}
+mass_draws <- gather_draws(mass.fits_comb, b_state_nameA, b_state_nameC, b_state_nameT, b_state_nameSA) 
+rm(mass.fits_comb)
+mass_draws$.variable[mass_draws$.variable == "b_state_nameA"] <- "Arboreal"
+mass_draws$.variable[mass_draws$.variable == "b_state_nameC"] <- "General"
+mass_draws$.variable[mass_draws$.variable == "b_state_nameT"] <- "Terrestrial"
+mass_draws$.variable[mass_draws$.variable == "b_state_nameSA"] <- "Amphibious"
+saveRDS(mass_draws, file = "/Users/.../....../mass.gathered.Rds")
+```
+
+# Plot Differences
+#### Total
+
+Fix names and plot
+```{r}
+total_plot <- total_draws %>%
+  filter(row_number() %% 10 == 1) %>%
+  compare_levels(.value, by = .variable)  %>%
+  ungroup() %>%
+  mutate(condition = reorder(.variable, .value)) %>%
+  ggplot(aes(y = .variable, x = .value)) + 
+  geom_halfeyeh() + 
+  #stat_dotsh(quantiles = 150, dotsize = 1.2) +
+  geom_vline(xintercept = c(0), linetype = "dashed") +
+  scale_fill_manual(values = c("gray80")) + 
+  labs(x = "Relative Hind total Differences\n",
+       y = "",
+       #title = "Hind total",
+       center = T) +
+  theme(plot.title = element_text(size=7)) + 
+  theme(axis.title.y  = element_text(size = 4)) +
+  theme_bw()
+
+#output_file = "totalContrasts.pdf"
+#ggsave(output_file, width = 9, height = 4.5)
+```
+
+#### Tail
+
+```{r}
+tail_plot <- tail_draws %>%
+  filter(row_number() %% 10 == 1) %>%
+  compare_levels(.value, by = .variable)  %>%
+  ungroup() %>%
+  mutate(condition = reorder(.variable, .value)) %>%
+  ggplot(aes(y = .variable, x = .value)) + 
+  geom_halfeyeh() + 
+  #stat_dotsh(quantiles = 150, dotsize = 1.2) +
+  geom_vline(xintercept = c(0), linetype = "dashed") +
+  scale_fill_manual(values = c("gray80")) + 
+  labs(x = "Relative Hind tail Differences\n",
+       y = "",
+       #title = "Hind tail",
+       center = T) +
+  theme(plot.title = element_text(size=7)) + 
+  theme(axis.title.y  = element_text(size = 4)) +
+  theme_bw()
+
+#output_file = "tail_Contrasts.pdf"
+#ggsave(output_file, width = 9, height = 4.5)
+```
+
+#### Foot
+
+```{r}
+foot_plot <- foot_draws %>%
+  filter(row_number() %% 10 == 1) %>%
+  compare_levels(.value, by = .variable)  %>%
+  ungroup() %>%
+  mutate(condition = reorder(.variable, .value)) %>%
+  ggplot(aes(y = .variable, x = .value)) + 
+  geom_halfeyeh() + 
+  #stat_dotsh(quantiles = 150, dotsize = 1.2) +
+  geom_vline(xintercept = c(0), linetype = "dashed") +
+  scale_fill_manual(values = c("gray80")) + 
+  labs(x = "Relative Hind Foot Differences\n",
+       y = "",
+       #title = "Hind Foot",
+       center = T) +
+  theme(plot.title = element_text(size=7)) + 
+  theme(axis.title.y  = element_text(size = 4)) +
+  theme_bw()
+
+#output_file = "foot_Contrasts.pdf"
+#ggsave(output_file, width = 9, height = 4.5)
+```
+
+#### Mass
+
+```{r}
+mass_plot <- mass_draws %>%
+  filter(row_number() %% 10 == 1) %>%
+  compare_levels(.value, by = .variable)  %>%
+  ungroup() %>%
+  mutate(condition = reorder(.variable, .value)) %>%
+  ggplot(aes(y = .variable, x = .value)) + 
+  geom_halfeyeh() + 
+  #stat_dotsh(quantiles = 150, dotsize = 1.2) +
+  geom_vline(xintercept = c(0), linetype = "dashed") +
+  scale_fill_manual(values = c("gray80")) + 
+  labs(x = "Relative Hind mass Differences\n",
+       y = "",
+       #title = "Hind mass",
+       center = T) +
+  theme(plot.title = element_text(size=7)) + 
+  theme(axis.title.y  = element_text(size = 4)) +
+  theme_bw()
+
+#output_file = "mass_Contrasts.pdf"
+#ggsave(output_file, width = 9, height = 4.5)
+```
