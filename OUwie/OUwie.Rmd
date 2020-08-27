@@ -1,0 +1,506 @@
+---
+title: "OUwie"
+author: "Nations"
+date: "8/27/2020"
+output: html_document
+---
+#OUwie analysis of all 4 traits
+
+This is a large script for all of the OUwie analyses from from Nations et al. `Locomotory mode transitions alter phenotypic evolution and lineage diversification in an ecologically rich clade of mammals`.
+
+This script is largely based on Sam Price's tutorial found here:
+http://treethinkers.org/tutorials/state-dependent-diversification-of-traits/
+
+Warning: This will take days. 100 trees for each model (5) for each trait (4). Each tree has just under 400 tips.
+
+#### Appropriate Models:
+The models with the state-specific alpha parameters produce negative eigenvalues.
+So I need to run only "BM1", "OU1", "BMS", "OUM", "OUMV"
+
+#### Data and files
+All the runs will be saved as Rds files which should just open right back up. They will be lists of vectors, and are pretty easy to manipulate.
+
+Get everything going
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "/Users....../....")
+```
+
+```{r}
+library(tidyverse)
+library(phytools)
+library(geiger)
+library(OUwie)
+```
+
+
+```{r}
+trees <- read.tree(file ="1000.nex")
+trees <- sample(trees, size = 100)
+```
+data
+```{r}
+dat <- read.csv("OUwie_data.csv", header=TRUE, stringsAsFactors=FALSE)
+state <- read.csv("OUwie_state.csv", header=TRUE,row.names=1, stringsAsFactors=FALSE)
+```
+
+
+```{r}
+tree <- trees[[1]]
+write.tree(tree, file = "one_tree.nwk")
+dtt <- read.tree("one_tree.nwk")
+```
+
+```{r}
+treedat <- treedata(dtt, state, warnings = T)
+```
+
+After the treedata, I added a list of tips to drop from the multiPhylo object. 
+Update tips based on the trait data list
+```{r}
+#dat <- treedat$data
+tips <- c("Aethomys_namaquensis", "Apodemus_alpicola", "Apodemus_chejuensis", "Apodemus_gurkha", "Apodemus_hermonensis", "Apodemus_hyrcanicus", "Apodemus_ilex", "Apodemus_wardi", "Apodemus_witherbyi", "Bunomys_spnov", "Carpomys_australis", "Gerbillus_gerbillus", "Grammomys_surdaster", "Hybomys_eisentrauti", "Hybomys_rufocanus", "Hylomyscus_endorobae", "Hylomyscus_kaimosae", "Hylomyscus_pamfi", "Hylomyscus_simus", "Hylomyscus_walterverheyeni", "Malpaisomys_insularis", "Melomys_bannisteri", "Melomys_burtoni", "Melomys_capensis", "Melomys_cooperae", "Melomys_rubicola", "Mesembriomys_gouldii", "Mesembriomys_macrourus", "Muriculus_imberbis", "Mus_famulus", "Mus_lepidoides", "Mus_macedonicus", "Mus_nitidulus", "Mus_platythrix", "Mus_spicilegus", "Myomyscus_yemeni", "Niviventer_bukit", "Niviventer_huang", "Niviventer_langbianis", "Niviventer_lepturus", "Niviventer_lotipes", "Niviventer_niviventer", "Notomys_alexis", "Notomys_aquilo", "Notomys_cervinus", "Notomys_mitchelli", "Otomys_jacksoni", "Paraleptomys_sp", "Praomys_coetzeei", "Pseudomys_albocinereus", "Pseudomys_bolami", "Pseudomys_calabyi", "Pseudomys_chapmani", "Pseudomys_fieldi", "Pseudomys_fumeus", "Pseudomys_gracilicaudatus", "Pseudomys_higginsi", "Pseudomys_johnsoni", "Pseudomys_laborifex", "Pseudomys_nanus", "Pseudomys_novaehollandiae", "Pseudomys_occidentalis", "Pseudomys_oralis", "Pseudomys_patrius", "Pseudomys_shortridgei", "Rattus_pyctoris", "Rattus_rattus_kandianus", "Rattus_satarae", "Rattus_timorensis", "Rhabdomys_dilectus", "Srilankamys_ohiensis", "Taeromys_punicans", "Taeromys_spnov", "Taeromys_taerae", "Zyzomys_maini", "Zyzomys_palatalis", "Zyzomys_woodwardi")
+tree<-lapply(trees,drop.tip,tip=tips)
+class(tree)<-"multiPhylo"
+```
+
+vectorize
+```{r}
+state<-setNames(state[,1],rownames(state))
+```
+
+#### Run Simmap
+Running 1 for each of 100 trees
+```{r}
+pi<-setNames(c(0.333,0.333,0.333,0.0001),c("1","2","3","4"))
+omaps <- make.simmap(tree, state, model="ARD", nsim = 1, Q="empirical", pi=pi)
+```
+
+###############################
+## Start OUwie analyses
+##############################
+
+
+################
+# TAILS
+################
+Get a Tails Only dataframe
+```{r}
+drops <- c("total","hf_hb", "logmass")
+tail_df <- dat[ , !(names(dat) %in% drops)]
+```
+
+
+#### Run Models
+This will loop through my 5 models and determine the parameter values and best fit model. 
+Sorry this is a mess! IF you are looking at this and have questions please let me know, or look at the tutorial linked at the top of the markdown.
+
+Get lists ready
+```{r}
+mods<-c("BM1", "BMS","OU1", "OUM", "OUMV") 
+tailresults<-list()
+```
+
+This is a double loop over everything,
+heavily annotated
+```{r}
+for(i in 1:length(omaps)){
+
+    print(i) #helps to know which tree it is working on
+
+    resmat<-matrix(nrow=27, ncol=5) # set up an empty results matrix for all the parameter estimates you are interested in, for each tree a new matrix will be created
+
+    colnames(resmat)<-c("BM1", "BMS", "OU1", "OUM", "OUMV")
+
+    row.names(resmat)<-c("loglik", "AICc", "A_alpha", "A_alphaSE","A_sigma", "A_sigmaSE", "C_alpha", "C_alphaSE","C_sigma", "C_sigmaSE", "SA_alph", "SA_alphaSE","SA_sigma", "SA_sigmaSE", "T_alpha", "T_alphaSE","T_sigma", "T_sigmaSE", "A_theta", "A_thetaSE", "C_theta", "C_thetaSE", "SA_theta", "SA_thetaSE", "T_theta", "T_thetaSE", "MLStatus")
+
+   for(j in 3:5){ # running OU models first
+# we want the diagnostics on, as you want to be able to evaluate the ML estimate. We also want to indicate that this time we are using stochastically mapped trees with simmap.tree=T  
+        tmpres<-OUwie(omaps[[i]], tail_df, model=mods[j], simmap.tree=TRUE, root.station=TRUE, diagn=T) 
+ev<-vector() # 
+            for(k in 1:length(tmpres$eigval)) if (tmpres$eigval[k]>0) ev<-c(ev,0) else ev<-c(ev,1) 
+# this is a looped if statement, it evaluates simple logical statements to see if any of the eigenvalues are negative, if not a 0 is added to the vector ev (if (tmpres$eigval[k]>0) ev<-c(ev,0))but if it is negative a 1 is added (else ev<-c(ev,1)).
+ eval<-vector()
+        if(sum(ev)==0) eval<-"All eigenvalues positive" else eval<-"Some eigenvalues negative" # if there are any eigenvalues that are negative the sum of the ev vector will be greater than 1.
+#We need to sort the results as mapped.edge determines the order, this may be problematic when we are summarizing across different maps as the the results are not always given in the order 1,2,3 but the sorting fixes this issue.
+
+ row.names(tmpres$theta)<-colnames(tmpres$solution)
+
+        tmpres$theta<-tmpres$theta[order(row.names(tmpres$theta)),]
+
+        tmpres$solution<-tmpres$solution[,order(colnames(tmpres$solution))] 
+
+        tmpres$solution.se<-tmpres$solution.se[,order(colnames(tmpres$solution.se))]
+
+        resmat[,j]<-c(tmpres$loglik, tmpres$AICc, tmpres$solution[1], tmpres$solution.se[1], tmpres$solution[2], tmpres$solution.se[2], tmpres$solution[3], tmpres$solution.se[3], tmpres$solution[4], tmpres$solution.se[4], tmpres$solution[5], tmpres$solution.se[5], tmpres$solution[6], tmpres$solution.se[6],  tmpres$solution[7], tmpres$solution.se[7], tmpres$solution[8], tmpres$solution.se[8], tmpres$theta[1], tmpres$theta[5], tmpres$theta[2], tmpres$theta[6], tmpres$theta[3], tmpres$theta[7],tmpres$theta[4], tmpres$theta[8],eval)
+
+    }
+
+for(l in 1:2){ # running BM models second – we don’t want any thetas in our results, OUwie gives output in the theta column which are the phylogenetic means but as there is not pull towards the mean they cannot really be considered ‘optima’
+  tmpres<-OUwie(omaps[[i]], tail_df, model=mods[l], simmap.tree=TRUE, root.station=TRUE, diagn=T) # we want the diagnostics on, as you want to be able to evaluate the ML estimate. We also want to indicate that this time we are using stochastically mapped trees with simmap.tree=T
+ev<-vector()
+ for(k in 1:length(tmpres$eigval)) if (tmpres$eigval[k]>0) ev<-c(ev,0) else ev<-c(ev,1) # this goes through and evaluates whether any of the eigenvalues are negative, if is not a 0 is added to the vector ev but if it is negative a 1 is added
+eval<-vector()
+        if(sum(ev)==0) eval<-"All eigenvalues positive" else eval<-"Some eigenvalues negative" # if there are any eigenvalues that are negative the sum of the ev vector will be greater than 1.
+#We need to sort the results as mapped.edge determines the order, this may be problematic when we are summarizing across different maps as the the results are not always given in the order 1,2,3 but the sorting fixes this issue.
+   tmpres$solution<-tmpres$solution[,order(colnames(tmpres$solution))] 
+        tmpres$solution.se<-tmpres$solution.se[,order(colnames(tmpres$solution.se))]
+        resmat[,l]<-c(tmpres$loglik, tmpres$AICc, tmpres$solution[1], tmpres$solution.se[1], tmpres$solution[2], tmpres$solution.se[2], tmpres$solution[3], tmpres$solution.se[3], tmpres$solution[4], tmpres$solution.se[4], tmpres$solution[5], tmpres$solution.se[5], tmpres$solution[6], tmpres$solution.se[6],  tmpres$solution[7], tmpres$solution.se[7], tmpres$solution[8], tmpres$solution.se[8], 0, 0, 0, 0, 0, 0, 0, 0, eval)# 0’s are for the thetas
+    }
+tailresults[[i]]<-resmat
+}
+```
+
+```{r}
+save(tailresults, file="OUwie_tail_results.Rdata")
+```
+
+#### Analyze Results
+First make sure all the ML estimates are okay according to the eigenvalues – you want #to remove the results of any that say "Some eigenvalues negative" – we shouldn’t have #any of these.
+```{r}
+
+errors<-matrix(nrow=length(omaps), ncol=ncol(tailresults[[1]]))
+
+colnames(errors)<-colnames(tailresults[[1]])
+
+for(i in 1:length(omaps)) errors[i,]<-tailresults[[1]][21,]
+```
+
+Now calculate the delta AICc for the different models across all trees
+```{r}
+AICctable<-matrix(nrow=length(omaps), ncol=ncol(tailresults[[1]]))
+
+colnames(AICctable)<-colnames(tailresults[[1]])
+
+for(i in 1:length(omaps)) AICctable[i,]<-as.numeric(tailresults[[i]][2,])-as.numeric(min(tailresults[[i]][2,]))
+
+colMeans(AICctable) 
+```
+
+
+################
+# TOTAL
+################
+
+Get a totals Only dataframe
+```{r}
+drops <- c("tail_index","hf_hb", "logmass")
+total_df <- dat[ , !(names(dat) %in% drops)]
+```
+
+
+# Run Full Models
+This will loop through my 5 models and determine the parameter values and best fit model.
+
+Get lists ready
+```{r}
+mods<-c("BM1", "BMS","OU1", "OUM", "OUMV") 
+
+totalresults<-list()
+```
+
+```{r}
+for(i in 1:length(omaps)){
+
+    print(i) 
+
+    resmat<-matrix(nrow=27, ncol=5)
+
+    colnames(resmat)<-c("BM1", "BMS", "OU1", "OUM", "OUMV")
+
+    row.names(resmat)<-c("loglik", "AICc", "A_alpha", "A_alphaSE","A_sigma", "A_sigmaSE", "C_alpha", "C_alphaSE","C_sigma", "C_sigmaSE", "SA_alph", "SA_alphaSE","SA_sigma", "SA_sigmaSE", "T_alpha", "T_alphaSE","T_sigma", "T_sigmaSE", "A_theta", "A_thetaSE", "C_theta", "C_thetaSE", "SA_theta", "SA_thetaSE", "T_theta", "T_thetaSE", "MLStatus")
+
+   for(j in 3:5){  
+
+        tmpres<-OUwie(omaps[[i]], total_df, model=mods[j], simmap.tree=TRUE, root.station=TRUE, diagn=T) 
+
+ev<-vector() # 
+
+            for(k in 1:length(tmpres$eigval)) if (tmpres$eigval[k]>0) ev<-c(ev,0) else ev<-c(ev,1) 
+
+ eval<-vector()
+
+        if(sum(ev)==0) eval<-"All eigenvalues positive" else eval<-"Some eigenvalues negative" 
+
+ row.names(tmpres$theta)<-colnames(tmpres$solution)
+
+        tmpres$theta<-tmpres$theta[order(row.names(tmpres$theta)),]
+
+        tmpres$solution<-tmpres$solution[,order(colnames(tmpres$solution))] 
+
+        tmpres$solution.se<-tmpres$solution.se[,order(colnames(tmpres$solution.se))]
+
+        resmat[,j]<-c(tmpres$loglik, tmpres$AICc, tmpres$solution[1], tmpres$solution.se[1], tmpres$solution[2], tmpres$solution.se[2], tmpres$solution[3], tmpres$solution.se[3], tmpres$solution[4], tmpres$solution.se[4], tmpres$solution[5], tmpres$solution.se[5], tmpres$solution[6], tmpres$solution.se[6],  tmpres$solution[7], tmpres$solution.se[7], tmpres$solution[8], tmpres$solution.se[8], tmpres$theta[1], tmpres$theta[5], tmpres$theta[2], tmpres$theta[6], tmpres$theta[3], tmpres$theta[7],tmpres$theta[4], tmpres$theta[8],eval)
+
+
+    }
+
+for(l in 1:2){ 
+
+  tmpres<-OUwie(omaps[[i]], total_df, model=mods[l], simmap.tree=TRUE, root.station=TRUE, diagn=T) 
+
+ev<-vector()
+
+ for(k in 1:length(tmpres$eigval)) if (tmpres$eigval[k]>0) ev<-c(ev,0) else ev<-c(ev,1) 
+
+eval<-vector()
+
+        if(sum(ev)==0) eval<-"All eigenvalues positive" else eval<-"Some eigenvalues negative" 
+
+   tmpres$solution<-tmpres$solution[,order(colnames(tmpres$solution))] 
+
+        tmpres$solution.se<-tmpres$solution.se[,order(colnames(tmpres$solution.se))]
+
+        resmat[,l]<-c(tmpres$loglik, tmpres$AICc, tmpres$solution[1], tmpres$solution.se[1], tmpres$solution[2], tmpres$solution.se[2], tmpres$solution[3], tmpres$solution.se[3], tmpres$solution[4], tmpres$solution.se[4], tmpres$solution[5], tmpres$solution.se[5], tmpres$solution[6], tmpres$solution.se[6],  tmpres$solution[7], tmpres$solution.se[7], tmpres$solution[8], tmpres$solution.se[8], 0, 0, 0, 0, 0, 0, 0, 0, eval)# 0’s are for the thetas
+
+    }
+
+totalresults[[i]]<-resmat
+
+}
+```
+
+```{r}
+save(totalresults, file="OUwie_total_results_20191210.Rdata")
+```
+
+#### Analyze Results
+First make sure all the ML estimates are okay according to the eigenvalues – you want #to remove the results of any that say "Some eigenvalues negative" – we shouldn’t have #any of these.
+```{r}
+
+errors<-matrix(nrow=length(omaps), ncol=ncol(totalresults[[1]]))
+
+colnames(errors)<-colnames(totalresults[[1]])
+
+for(i in 1:length(omaps)) errors[i,]<-totalresults[[1]][21,]
+```
+
+Now calculate the delta AICc for the different models across all trees
+```{r}
+AICctable<-matrix(nrow=length(omaps), ncol=ncol(totalresults[[1]]))
+
+colnames(AICctable)<-colnames(totalresults[[1]])
+
+for(i in 1:length(omaps)) AICctable[i,]<-as.numeric(totalresults[[i]][2,])-as.numeric(min(totalresults[[i]][2,]))
+
+colMeans(AICctable) 
+```
+
+
+################
+# HIND FEET
+################
+
+Get a foots Only dataframe
+```{r}
+drops <- c("tail_index","total", "logmass")
+foot_df <- dat[ , !(names(dat) %in% drops)]
+```
+
+# Run Full Models
+This will loop through my 5 models and determine the parameter values and best fit model.
+
+Get lists ready
+```{r}
+mods<-c("BM1", "BMS","OU1", "OUM", "OUMV") 
+
+footresults<-list()
+```
+
+```{r}
+for(i in 1:length(omaps)){
+
+    print(i) 
+
+    resmat<-matrix(nrow=27, ncol=5) 
+
+    colnames(resmat)<-c("BM1", "BMS", "OU1", "OUM", "OUMV")
+
+    row.names(resmat)<-c("loglik", "AICc", "A_alpha", "A_alphaSE","A_sigma", "A_sigmaSE", "C_alpha", "C_alphaSE","C_sigma", "C_sigmaSE", "SA_alph", "SA_alphaSE","SA_sigma", "SA_sigmaSE", "T_alpha", "T_alphaSE","T_sigma", "T_sigmaSE", "A_theta", "A_thetaSE", "C_theta", "C_thetaSE", "SA_theta", "SA_thetaSE", "T_theta", "T_thetaSE", "MLStatus")
+
+   for(j in 3:5){ 
+     
+        tmpres<-OUwie(omaps[[i]], foot_df, model=mods[j], simmap.tree=TRUE, root.station=TRUE, diagn=T) 
+
+ev<-vector() # 
+
+            for(k in 1:length(tmpres$eigval)) if (tmpres$eigval[k]>0) ev<-c(ev,0) else ev<-c(ev,1) 
+
+ eval<-vector()
+
+        if(sum(ev)==0) eval<-"All eigenvalues positive" else eval<-"Some eigenvalues negative"
+
+ row.names(tmpres$theta)<-colnames(tmpres$solution)
+
+        tmpres$theta<-tmpres$theta[order(row.names(tmpres$theta)),]
+
+        tmpres$solution<-tmpres$solution[,order(colnames(tmpres$solution))] 
+
+        tmpres$solution.se<-tmpres$solution.se[,order(colnames(tmpres$solution.se))]
+
+        resmat[,j]<-c(tmpres$loglik, tmpres$AICc, tmpres$solution[1], tmpres$solution.se[1], tmpres$solution[2], tmpres$solution.se[2], tmpres$solution[3], tmpres$solution.se[3], tmpres$solution[4], tmpres$solution.se[4], tmpres$solution[5], tmpres$solution.se[5], tmpres$solution[6], tmpres$solution.se[6],  tmpres$solution[7], tmpres$solution.se[7], tmpres$solution[8], tmpres$solution.se[8], tmpres$theta[1], tmpres$theta[5], tmpres$theta[2], tmpres$theta[6], tmpres$theta[3], tmpres$theta[7],tmpres$theta[4], tmpres$theta[8],eval)
+
+
+    }
+
+for(l in 1:2){ 
+  
+  tmpres<-OUwie(omaps[[i]], foot_df, model=mods[l], simmap.tree=TRUE, root.station=TRUE, diagn=T) 
+
+ev<-vector()
+
+ for(k in 1:length(tmpres$eigval)) if (tmpres$eigval[k]>0) ev<-c(ev,0) else ev<-c(ev,1) 
+
+eval<-vector()
+
+        if(sum(ev)==0) eval<-"All eigenvalues positive" else eval<-"Some eigenvalues negative" 
+
+   tmpres$solution<-tmpres$solution[,order(colnames(tmpres$solution))] 
+
+        tmpres$solution.se<-tmpres$solution.se[,order(colnames(tmpres$solution.se))]
+
+    
+
+        resmat[,l]<-c(tmpres$loglik, tmpres$AICc, tmpres$solution[1], tmpres$solution.se[1], tmpres$solution[2], tmpres$solution.se[2], tmpres$solution[3], tmpres$solution.se[3], tmpres$solution[4], tmpres$solution.se[4], tmpres$solution[5], tmpres$solution.se[5], tmpres$solution[6], tmpres$solution.se[6],  tmpres$solution[7], tmpres$solution.se[7], tmpres$solution[8], tmpres$solution.se[8], 0, 0, 0, 0, 0, 0, 0, 0, eval)# 0’s are for the thetas
+  
+
+    }
+
+footresults[[i]]<-resmat
+
+}
+```
+
+```{r}
+save(footresults, file="OUwie_foot_results_20191210.Rdata")
+```
+
+#### Analyze Results
+First make sure all the ML estimates are okay according to the eigenvalues – you want #to remove the results of any that say "Some eigenvalues negative" – we shouldn’t have #any of these.
+```{r}
+
+errors<-matrix(nrow=length(omaps), ncol=ncol(footresults[[1]]))
+
+colnames(errors)<-colnames(footresults[[1]])
+
+for(i in 1:length(omaps)) errors[i,]<-footresults[[1]][21,]
+```
+
+Now calculate the delta AICc for the different models across all trees
+```{r}
+AICctable<-matrix(nrow=length(omaps), ncol=ncol(footresults[[1]]))
+
+colnames(AICctable)<-colnames(footresults[[1]])
+
+for(i in 1:length(omaps)) AICctable[i,]<-as.numeric(footresults[[i]][2,])-as.numeric(min(footresults[[i]][2,]))
+
+colMeans(AICctable) 
+```
+
+
+################
+# MASS
+################
+
+
+Get a masss Only dataframe
+```{r}
+drops <- c("tail_index","total", "hf_hb")
+mass_df <- dat[ , !(names(dat) %in% drops)]
+```
+
+# Run Full Models
+This will loop through my 5 models and determine the parameter values and best fit model.
+
+Get lists ready
+```{r}
+mods<-c("BM1", "BMS","OU1", "OUM", "OUMV") 
+
+massresults<-list()
+```
+
+```{r}
+for(i in 1:length(omaps)){
+
+    print(i) 
+
+    resmat<-matrix(nrow=27, ncol=5) 
+
+    colnames(resmat)<-c("BM1", "BMS", "OU1", "OUM", "OUMV")
+
+    row.names(resmat)<-c("loglik", "AICc", "A_alpha", "A_alphaSE","A_sigma", "A_sigmaSE", "C_alpha", "C_alphaSE","C_sigma", "C_sigmaSE", "SA_alph", "SA_alphaSE","SA_sigma", "SA_sigmaSE", "T_alpha", "T_alphaSE","T_sigma", "T_sigmaSE", "A_theta", "A_thetaSE", "C_theta", "C_thetaSE", "SA_theta", "SA_thetaSE", "T_theta", "T_thetaSE", "MLStatus")
+
+   for(j in 3:5){ 
+
+
+        tmpres<-OUwie(omaps[[i]], mass_df, model=mods[j], simmap.tree=TRUE, root.station=TRUE, diagn=T) 
+
+ev<-vector() 
+
+            for(k in 1:length(tmpres$eigval)) if (tmpres$eigval[k]>0) ev<-c(ev,0) else ev<-c(ev,1) 
+
+ eval<-vector()
+
+        if(sum(ev)==0) eval<-"All eigenvalues positive" else eval<-"Some eigenvalues negative"
+
+ row.names(tmpres$theta)<-colnames(tmpres$solution)
+
+        tmpres$theta<-tmpres$theta[order(row.names(tmpres$theta)),]
+
+        tmpres$solution<-tmpres$solution[,order(colnames(tmpres$solution))] 
+
+        tmpres$solution.se<-tmpres$solution.se[,order(colnames(tmpres$solution.se))]
+
+        resmat[,j]<-c(tmpres$loglik, tmpres$AICc, tmpres$solution[1], tmpres$solution.se[1], tmpres$solution[2], tmpres$solution.se[2], tmpres$solution[3], tmpres$solution.se[3], tmpres$solution[4], tmpres$solution.se[4], tmpres$solution[5], tmpres$solution.se[5], tmpres$solution[6], tmpres$solution.se[6],  tmpres$solution[7], tmpres$solution.se[7], tmpres$solution[8], tmpres$solution.se[8], tmpres$theta[1], tmpres$theta[5], tmpres$theta[2], tmpres$theta[6], tmpres$theta[3], tmpres$theta[7],tmpres$theta[4], tmpres$theta[8],eval)
+
+    }
+
+for(l in 1:2){ 
+
+  tmpres<-OUwie(omaps[[i]], mass_df, model=mods[l], simmap.tree=TRUE, root.station=TRUE, diagn=T) 
+  
+ev<-vector()
+
+ for(k in 1:length(tmpres$eigval)) if (tmpres$eigval[k]>0) ev<-c(ev,0) else ev<-c(ev,1)
+
+eval<-vector()
+
+        if(sum(ev)==0) eval<-"All eigenvalues positive" else eval<-"Some eigenvalues negative"
+
+   tmpres$solution<-tmpres$solution[,order(colnames(tmpres$solution))] 
+
+        tmpres$solution.se<-tmpres$solution.se[,order(colnames(tmpres$solution.se))]
+
+        resmat[,l]<-c(tmpres$loglik, tmpres$AICc, tmpres$solution[1], tmpres$solution.se[1], tmpres$solution[2], tmpres$solution.se[2], tmpres$solution[3], tmpres$solution.se[3], tmpres$solution[4], tmpres$solution.se[4], tmpres$solution[5], tmpres$solution.se[5], tmpres$solution[6], tmpres$solution.se[6],  tmpres$solution[7], tmpres$solution.se[7], tmpres$solution[8], tmpres$solution.se[8], 0, 0, 0, 0, 0, 0, 0, 0, eval)# 0’s are for the thetas
+
+    }
+
+massresults[[i]]<-resmat
+
+}
+```
+
+```{r}
+save(massresults, file="OUwie_mass_results.Rdata")
+```
+
+#### Analyze Results
+First make sure all the ML estimates are okay according to the eigenvalues – you want #to remove the results of any that say "Some eigenvalues negative" – we shouldn’t have #any of these.
+```{r}
+
+errors<-matrix(nrow=length(omaps), ncol=ncol(massresults[[1]]))
+
+colnames(errors)<-colnames(massresults[[1]])
+
+for(i in 1:length(omaps)) errors[i,]<-massresults[[1]][21,]
+```
+
+Now calculate the delta AICc for the different models across all trees
+```{r}
+AICctable<-matrix(nrow=length(omaps), ncol=ncol(massresults[[1]]))
+
+colnames(AICctable)<-colnames(massresults[[1]])
+
+for(i in 1:length(omaps)) AICctable[i,]<-as.numeric(massresults[[i]][2,])-as.numeric(min(massresults[[i]][2,]))
+
+colMeans(AICctable) 
+```
