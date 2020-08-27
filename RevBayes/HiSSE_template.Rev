@@ -1,0 +1,258 @@
+################################################################################
+#
+# RevBayes Analysis: Bayesian inference of diversification rates under a
+#                    character-dependent birth-death model.
+#                    Here each transition rate between observed states is
+#                    drawn from an independent exponentially distributed 
+#                    rate. The transition rates between hidden states are
+#                    all equal and drawn from another exponentially 
+#                    distributed rate.
+# 
+# Largely following the Freyman and Hoehna 2019 paper
+#
+#
+# I am using 4 states with 2 hidden states.
+#
+# This was run on the LSU HPC. 
+# We used a custom script to send this script out to 100 nodes, each with a different tree
+# Please contact me if you would like more information
+#
+#
+# This one has a slow A and a fast B and fixed root states
+#
+################################################################################
+
+
+setOption("useScaling","true")
+setOption("scalingDensity","1")
+
+# set my move index
+mvi = 0
+mni = 0
+
+#######################
+# Reading in the Data #
+#######################
+
+
+
+### Read in Tree data
+psi <- readTrees("112trees_2.nex")[tacocat]
+
+### Read In State Data
+data <- readCharacterData("dat.nex")
+
+
+### There are 2 hidden states, which means 1a, 1b, 2a, 2b, 3a, 3b, 4a, 4b  
+
+
+# add unobserved hidden states
+data_exp <- data.expandCharacters( 2 )
+
+#taxa
+taxa <- psi.taxa()
+
+#Total number of states for root prior
+NUM_STATES = 8
+
+####################
+# Create the rates #
+####################
+
+#Speciation Prior, based on https://revbayes.github.io/tutorials/chromo/#stochastic
+# using an estimation of net-diversificaiton rate as the prior
+
+speciation_mean <- ln( 435 ) / psi.rootAge()
+speciation_pr <- 1 / speciation_mean
+
+### Specify a prior on the diversification and turnover rate
+### Making state A "slow" and state B "fast"
+
+
+for (i in 1:4) {
+    
+    speciation[i] ~ dnExponential(speciation_pr)
+    moves[mvi++] = mvScale(speciation[i], lambda=2.0, weight=2)
+    moves[mvi++] = mvScale(speciation[i], lambda=0.5, weight=2)
+    moves[mvi++] = mvScale(speciation[i], lambda=0.01, weight=2)
+    
+    extinction[i] ~ dnExponential(speciation_pr)
+    moves[mvi++] = mvScale(extinction[i], lambda=2.0, weight=2)
+    moves[mvi++] = mvScale(extinction[i], lambda=0.5, weight=2)
+    moves[mvi++] = mvScale(extinction[i], lambda=0.01, weight=2)
+    
+    up_down_scale_mv[i] = mvUpDownScale(lambda=0.5, weight=2)
+    up_down_scale_mv[i].addVariable( speciation[i], TRUE )
+    up_down_scale_mv[i].addVariable( extinction[i], TRUE )
+    moves[mvi++] = up_down_scale_mv[i]
+    
+    up_down_scale_mv2[i] = mvUpDownScale(lambda=2.0, weight=2)
+    up_down_scale_mv2[i].addVariable( speciation[i], TRUE )
+    up_down_scale_mv2[i].addVariable( extinction[i], TRUE )
+    moves[mvi++] = up_down_scale_mv2[i]
+
+}
+
+for (i in 5:8) {
+    
+    speciation[i] ~ dnLognormal(speciation[1], 0.8)
+    moves[mvi++] = mvScale(speciation[i], lambda=2.0, weight=2)
+    moves[mvi++] = mvScale(speciation[i], lambda=0.5, weight=2)
+    moves[mvi++] = mvScale(speciation[i], lambda=0.01, weight=2)
+    
+    extinction[i] ~ dnExponential(speciation_pr)
+    moves[mvi++] = mvScale(extinction[i], lambda=2.0, weight=2)
+    moves[mvi++] = mvScale(extinction[i], lambda=0.5, weight=2)
+    moves[mvi++] = mvScale(extinction[i], lambda=0.01, weight=2)
+    
+    up_down_scale_mv[i] = mvUpDownScale(lambda=0.5, weight=2)
+    up_down_scale_mv[i].addVariable( speciation[i], TRUE )
+    up_down_scale_mv[i].addVariable( extinction[i], TRUE )
+    moves[mvi++] = up_down_scale_mv[i]
+    
+    up_down_scale_mv2[i] = mvUpDownScale(lambda=2.0, weight=2)
+    up_down_scale_mv2[i].addVariable( speciation[i], TRUE )
+    up_down_scale_mv2[i].addVariable( extinction[i], TRUE )
+    moves[mvi++] = up_down_scale_mv2[i]
+
+}
+
+diversification := speciation - extinction
+
+
+#########################################################
+# Set up the transition & rate matrix for observed states #
+#########################################################
+
+# transition rates among states
+# No Longer Estimating num_events, instead using exp(1)
+#This cuts down on moves and should converge faster
+#num_events ~ dnExponential(1/20)
+#moves[mvi++] = mvScale(num_events, lambda=20, weight=3)
+#moves[mvi++] = mvScale(num_events, lambda=2, weight=3)
+#rate_pr := psi.treeLength() / num_events
+# example of previous: rate_12 ~ dnExponential( rate_pr )
+
+# between observed states
+rate_12 ~ dnExponential(2)
+rate_13 ~ dnExponential(2)
+rate_14 ~ dnExponential(2)
+rate_21 ~ dnExponential(2)
+rate_23 ~ dnExponential(2)
+rate_24 ~ dnExponential(2)
+rate_31 ~ dnExponential(2)
+rate_32 ~ dnExponential(2)
+rate_34 ~ dnExponential(2)
+rate_41 ~ dnExponential(2)
+rate_42 ~ dnExponential(2)
+rate_43 ~ dnExponential(2)
+Q := [rate_12, rate_13, rate_14, rate_21, rate_23, rate_24, rate_31, rate_32, rate_34, rate_41, rate_42, rate_43]
+
+# between hidden states
+rate_AB ~ dnExponential(2)
+rate_BA ~ dnExponential(2)
+R := [rate_AB, rate_BA]
+
+# the rate matrix for the combined observed and hidden states 
+rate_matrix := fnHiddenStateRateMatrix(Q, R, rescaled=false)
+    
+moves[mvi++] = mvScale(rate_12, lambda=1.0, weight=2, tune = TRUE)
+moves[mvi++] = mvScale(rate_13, lambda=1.0, weight=2, tune = TRUE)
+moves[mvi++] = mvScale(rate_14, lambda=1.0, weight=2, tune = TRUE)
+moves[mvi++] = mvScale(rate_21, lambda=1.0, weight=2, tune = TRUE)
+moves[mvi++] = mvScale(rate_23, lambda=1.0, weight=2, tune = TRUE)
+moves[mvi++] = mvScale(rate_24, lambda=1.0, weight=2, tune = TRUE)
+moves[mvi++] = mvScale(rate_31, lambda=1.0, weight=2, tune = TRUE)
+moves[mvi++] = mvScale(rate_32, lambda=1.0, weight=2, tune = TRUE)
+moves[mvi++] = mvScale(rate_34, lambda=1.0, weight=2, tune = TRUE)
+moves[mvi++] = mvScale(rate_41, lambda=1.0, weight=2, tune = TRUE)
+moves[mvi++] = mvScale(rate_42, lambda=1.0, weight=2, tune = TRUE)
+moves[mvi++] = mvScale(rate_43, lambda=1.0, weight=2, tune = TRUE)
+moves[mvi++] = mvScale(rate_AB, lambda=1.0, weight=2, tune = TRUE)
+moves[mvi++] = mvScale(rate_BA, lambda=1.0, weight=2, tune = TRUE)
+
+
+
+#####################################
+# Set up the root state frequencies #
+#####################################
+# Fixing Root States
+root_states = simplex( [1,1,1,1,0,0,0,0] )
+
+
+
+# rho is the probability of sampling species at the present
+rho <- psi.ntips()/700
+
+
+
+# character dependent birth death process
+timetree ~ dnCDBDP( rootAge = psi.rootAge(), speciationRates = speciation, extinctionRates = extinction, Q = rate_matrix, delta = 1.0, pi = root_states, rho = rho, condition = "survival")
+
+
+### clamp the model with the "observed" tree
+timetree.clamp( psi )
+timetree.clampCharData( data_exp )
+
+
+
+#############
+# The Model #
+#############
+
+### workspace model wrapper ###
+mymodel = model(timetree)
+
+### set up the monitors that will output parameter values to file and screen 
+monitors[mni++] = mnScreen(printgen=50, speciation, diversification, extinction)
+
+monitors[mni++] = mnModel(filename="20190718/HiSSE_tacocat.log", printgen=5)
+
+monitors[mni++] = mnStochasticCharacterMap(cdbdp=timetree, printgen=50, filename="20190718/simmap_tacocat.log", include_simmap=true)
+
+monitors[mni++] = mnJointConditionalAncestralState(tree=timetree, cdbdp=timetree, type ="NaturalNumbers", printgen=50, withTips=true, withStartStates=false, filename="20190718/HiSSE_AncSt_tacocat.log")
+
+
+################
+# The Analysis #
+################
+
+### workspace mcmc
+mymcmc = mcmc(mymodel, monitors, moves) 
+
+### pre-burnin to tune the proposals
+mymcmc.burnin(generations=500,tuningInterval=50)
+
+### run the MCMC
+mymcmc.run(generations=4000)
+
+##############################
+# Summarize ancestral states #
+##############################
+#
+#
+###### script to summarize sampled character histories as a tab-delimited file
+#anc_tree = psi
+#x = readAncestralStateTrace("20190718/stochastic_states_tacocat.log")
+#
+#summarizeCharacterMaps(x, psi, file="20190718/events.tsv", burnin=0.1)
+#
+#
+###### script to summarize the maximum a posteriori character history
+#burnin=1000
+#n_time_slices = 500
+#
+## read in the sampled character histories
+##I alrady did this, called x
+##anc_states = readAncestralStateTrace("20190718/stochastic_states_tacocat.log")
+#
+## make summary tree
+#characterMapTree(tree=psi, 
+#                 ancestral_state_trace_vector=x, 
+#                 character_file="20190718/marginal_character.tree", 
+#                 posterior_file="20190718/marginal_posterior.tree", 
+#                 burnin=burnin, 
+#                 num_time_slices=n_time_slices)
+#
+
+q()
